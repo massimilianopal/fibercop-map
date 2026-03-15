@@ -169,7 +169,37 @@ def build_status_map(
     return sorted_items, processed_rows, skipped_rows, duplicate_rows, len(conflicting_ids)
 
 
-def write_output(source_file: str, items: dict[str, dict[str, str]]) -> None:
+def load_existing_output() -> dict[str, object] | None:
+    try:
+        with OUTPUT_JSON.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def data_changed(
+    existing_payload: dict[str, object] | None,
+    source_file: str,
+    items: dict[str, dict[str, str]],
+) -> bool:
+    if existing_payload is None:
+        return True
+
+    return (
+        existing_payload.get("source_file") != source_file
+        or existing_payload.get("items") != items
+    )
+
+
+def write_output(source_file: str, items: dict[str, dict[str, str]]) -> bool:
+    existing_payload = load_existing_output()
+    if not data_changed(existing_payload, source_file, items):
+        return False
+
     payload = {
         "source_file": source_file,
         "updated_at": utc_timestamp(),
@@ -179,6 +209,8 @@ def write_output(source_file: str, items: dict[str, dict[str, str]]) -> None:
     OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     with OUTPUT_JSON.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+
+    return True
 
 
 def main() -> int:
@@ -190,7 +222,7 @@ def main() -> int:
             reader,
             columns,
         )
-        write_output(source_file, items)
+        file_updated = write_output(source_file, items)
     except BuildStatusPointsError as exc:
         print(f"Errore: {exc}", file=sys.stderr)
         return 1
@@ -201,7 +233,10 @@ def main() -> int:
     print(f"CSV trovato: {source_file}")
     print(f"Encoding usato: {encoding}")
     print(f"Elaborati {processed_rows} record dal CSV.")
-    print(f"Salvati {len(items)} ID univoci in {OUTPUT_JSON}.")
+    if file_updated:
+        print(f"Salvati {len(items)} ID univoci in {OUTPUT_JSON}.")
+    else:
+        print("No data changes detected; status_points.json left unchanged")
     if skipped_rows:
         print(f"Saltate {skipped_rows} righe senza ID_ELEMENTO.")
     if duplicate_rows:
