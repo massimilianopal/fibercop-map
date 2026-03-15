@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FiberCop Map</title>
+
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1>FiberCop Map</h1>
+        <p class="subtitle">
+          Mappa CRO/CNO con filtro per regione e provincia
+        </p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="panel">
+          <h2>Filtri</h2>
+
+          <label for="regionSelect">Regione</label>
+          <select id="regionSelect">
+            <option value="">Seleziona una regione</option>
+          </select>
+
+          <label for="provinceSelect">Provincia</label>
+          <select id="provinceSelect" disabled>
+            <option value="">Seleziona una provincia</option>
+          </select>
+
+          <button id="resetButton" type="button">Reset</button>
+        </div>
+
+        <div class="panel">
+          <h2>Risultati</h2>
+          <p id="statusText">Caricamento dati...</p>
+        </div>
+      </aside>
+
+      <section class="map-section">
+        <div id="map"></div>
+      </section>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
