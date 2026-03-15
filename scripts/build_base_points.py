@@ -2,14 +2,51 @@
 
 import csv
 import json
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 INPUT_CSV = ROOT / "data" / "old_cro_cno.csv"
 OUTPUT_JSON = ROOT / "data" / "base_points.json"
 
-# Mappa provincia -> regione
-PROVINCE_TO_REGION = {
+
+def clean_string(value: str) -> str:
+    return (value or "").strip()
+
+
+def parse_float(value: str):
+    value = clean_string(value).replace(",", ".")
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def normalize_province_name(value: str) -> str:
+    value = (value or "").strip().upper()
+
+    # Uniforma apostrofi e trattini
+    value = value.replace("’", "'").replace("`", "'")
+    value = value.replace("-", " ")
+
+    # Rimuove gli accenti: FORLÌ -> FORLI
+    value = "".join(
+        c for c in unicodedata.normalize("NFD", value)
+        if unicodedata.category(c) != "Mn"
+    )
+
+    # Rimuove apostrofi residui
+    value = value.replace("'", " ")
+
+    # Collassa spazi multipli
+    value = " ".join(value.split())
+
+    return value
+
+
+RAW_PROVINCE_TO_REGION = {
     "AGRIGENTO": "SICILIA",
     "ALESSANDRIA": "PIEMONTE",
     "ANCONA": "MARCHE",
@@ -119,20 +156,15 @@ PROVINCE_TO_REGION = {
     "VITERBO": "LAZIO",
 }
 
-def clean_string(value: str) -> str:
-    return (value or "").strip()
+PROVINCE_TO_REGION = {
+    normalize_province_name(province): region
+    for province, region in RAW_PROVINCE_TO_REGION.items()
+}
 
-def parse_float(value: str):
-    value = clean_string(value).replace(",", ".")
-    if not value:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
 
 def build_point(row: dict) -> dict | None:
-    provincia = clean_string(row.get("PROVINCIA", "")).upper()
+    provincia_raw = clean_string(row.get("PROVINCIA", "")).upper()
+    provincia_key = normalize_province_name(provincia_raw)
     comune = clean_string(row.get("COMUNE", "")).upper()
     lat = parse_float(row.get("LATITUDINE", ""))
     lon = parse_float(row.get("LONGITUDINE", ""))
@@ -140,12 +172,12 @@ def build_point(row: dict) -> dict | None:
     if lat is None or lon is None:
         return None
 
-    regione = PROVINCE_TO_REGION.get(provincia, "")
+    regione = PROVINCE_TO_REGION.get(provincia_key, "")
 
     return {
         "id": clean_string(row.get("ID_ELEMENTO", "")).upper(),
         "regione": regione,
-        "provincia": provincia,
+        "provincia": provincia_raw,
         "comune": comune,
         "lat": lat,
         "lon": lon,
@@ -159,20 +191,29 @@ def build_point(row: dict) -> dict | None:
         "data_pubblicazione": clean_string(row.get("DATA_PUBBLICAZIONE", "")),
     }
 
+
 def main():
     if not INPUT_CSV.exists():
         raise FileNotFoundError(f"File non trovato: {INPUT_CSV}")
 
     points = []
     skipped = 0
+    unmapped_provinces = set()
 
     with INPUT_CSV.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
+            provincia_raw = clean_string(row.get("PROVINCIA", "")).upper()
+            provincia_key = normalize_province_name(provincia_raw)
+
+            if provincia_key and provincia_key not in PROVINCE_TO_REGION:
+                unmapped_provinces.add(provincia_raw)
+
             point = build_point(row)
             if point is None:
                 skipped += 1
                 continue
+
             points.append(point)
 
     points.sort(key=lambda p: (p["regione"], p["provincia"], p["comune"], p["id"]))
@@ -183,6 +224,14 @@ def main():
 
     print(f"Creati {len(points)} punti in {OUTPUT_JSON}")
     print(f"Scartate {skipped} righe senza coordinate valide")
+
+    if unmapped_provinces:
+        print("\nProvince non mappate trovate nel CSV:")
+        for province in sorted(unmapped_provinces):
+            print(f" - {province}")
+    else:
+        print("\nTutte le province del CSV sono state mappate correttamente.")
+
 
 if __name__ == "__main__":
     main()
