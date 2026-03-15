@@ -1,4 +1,5 @@
-const DATA_URL = "./data/base_points.json";
+const BASE_DATA_URL = "./data/base_points.json";
+const STATUS_DATA_URL = "./data/status_points.json";
 
 const regionSelect = document.getElementById("regionSelect");
 const provinceSelect = document.getElementById("provinceSelect");
@@ -6,6 +7,8 @@ const citySelect = document.getElementById("citySelect");
 const showButton = document.getElementById("showButton");
 const resetButton = document.getElementById("resetButton");
 const statusText = document.getElementById("statusText");
+const statusSourceFile = document.getElementById("statusSourceFile");
+const statusUpdatedAt = document.getElementById("statusUpdatedAt");
 
 const map = L.map("map").setView([42.5, 12.5], 6);
 
@@ -16,6 +19,10 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 let allPoints = [];
 let markersLayer = L.layerGroup().addTo(map);
+let statusMetadata = {
+  source_file: "",
+  updated_at: "",
+};
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -28,6 +35,46 @@ function escapeHtml(value) {
 
 function normalize(value) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+function formatDisplayValue(value) {
+  const normalizedValue = String(value ?? "").trim();
+  return normalizedValue || "-";
+}
+
+function formatUpdatedAt(value) {
+  const normalizedValue = String(value ?? "").trim();
+
+  if (!normalizedValue) {
+    return "Non disponibile";
+  }
+
+  const parsedDate = new Date(normalizedValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return normalizedValue;
+  }
+
+  return parsedDate.toLocaleString("it-IT", {
+    dateStyle: "short",
+    timeStyle: "medium",
+  });
+}
+
+function renderStatusMetadata() {
+  statusSourceFile.textContent = statusMetadata.source_file || "Non disponibile";
+  statusUpdatedAt.textContent = formatUpdatedAt(statusMetadata.updated_at);
+}
+
+function mergePointsWithStatus(points, statusItems) {
+  return points.map((point) => {
+    const statusPoint = statusItems?.[point.id] ?? null;
+
+    return {
+      ...point,
+      current_stato: statusPoint?.stato ?? null,
+      current_data_disponibilita: statusPoint?.data_disponibilita ?? "",
+    };
+  });
 }
 
 function populateRegions(points) {
@@ -108,13 +155,16 @@ function buildPopup(point) {
     <div>
       <h3 class="popup-title">${escapeHtml(point.id)}</h3>
       <div class="popup-grid">
+        <strong>ID</strong><span>${escapeHtml(point.id)}</span>
         <strong>Regione</strong><span>${escapeHtml(point.regione)}</span>
         <strong>Provincia</strong><span>${escapeHtml(point.provincia)}</span>
         <strong>Comune</strong><span>${escapeHtml(point.comune)}</span>
         <strong>Tipo</strong><span>${escapeHtml(point.tipo)}</span>
         <strong>ACL</strong><span>${escapeHtml(point.codice_acl)}</span>
-        <strong>Stato</strong><span>${escapeHtml(point.stato)}</span>
-        <strong>Disponibilità</strong><span>${escapeHtml(point.data_disponibilita || "-")}</span>
+        <strong>Stato attuale</strong><span>${escapeHtml(formatDisplayValue(point.current_stato))}</span>
+        <strong>Data disponibilità attuale</strong><span>${escapeHtml(formatDisplayValue(point.current_data_disponibilita))}</span>
+        <strong class="popup-secondary-label">Stato storico</strong><span class="popup-secondary-value">${escapeHtml(formatDisplayValue(point.stato))}</span>
+        <strong class="popup-secondary-label">Data disponibilità storica</strong><span class="popup-secondary-value">${escapeHtml(formatDisplayValue(point.data_disponibilita))}</span>
         <strong>Indirizzo</strong><span>${escapeHtml(point.indirizzo || "-")}</span>
         <strong>Lat</strong><span>${escapeHtml(point.lat)}</span>
         <strong>Lon</strong><span>${escapeHtml(point.lon)}</span>
@@ -253,17 +303,42 @@ function resetFilters() {
 
 async function loadData() {
   try {
-    const response = await fetch(DATA_URL);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    const baseRequest = fetch(BASE_DATA_URL).then((response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
-    allPoints = await response.json();
+      return response.json();
+    });
+
+    const statusRequest = fetch(STATUS_DATA_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        return response.json();
+      })
+      .catch((error) => {
+        console.warn("Impossibile caricare status_points.json:", error);
+        return null;
+      });
+
+    const [basePoints, statusData] = await Promise.all([baseRequest, statusRequest]);
+
+    statusMetadata = {
+      source_file: statusData?.source_file ?? "",
+      updated_at: statusData?.updated_at ?? "",
+    };
+
+    allPoints = mergePointsWithStatus(basePoints, statusData?.items ?? {});
     populateRegions(allPoints);
+    renderStatusMetadata();
     statusText.textContent =
       "Seleziona una regione e una provincia per visualizzare i punti.";
   } catch (error) {
     console.error(error);
+    renderStatusMetadata();
     statusText.textContent = "Errore nel caricamento dei dati.";
   }
 }

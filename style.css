@@ -119,7 +119,39 @@ button:hover {
 }
 
 .popup-grid strong {
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.status-meta {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.status-meta h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  font-size: 13px;
+}
+
+.meta-grid strong {
+  margin-top: 6px;
+}
+
+.meta-grid strong:first-child {
+  margin-top: 0;
+}
+
+.meta-grid span,
+.popup-secondary-label,
+.popup-secondary-value {
+  color: #6b7280;
 }
 
 @media (max-width: 900px) {

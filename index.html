@@ -26,29 +26,38 @@
     <main class="layout">
       <aside class="sidebar">
         <div class="panel">
-        <h2>Filtri</h2>
+          <h2>Filtri</h2>
 
-        <label for="regionSelect">Regione</label>
-        <select id="regionSelect">
+          <label for="regionSelect">Regione</label>
+          <select id="regionSelect">
             <option value="">Seleziona una regione</option>
-        </select>
+          </select>
 
-        <label for="provinceSelect">Provincia</label>
-        <select id="provinceSelect" disabled>
+          <label for="provinceSelect">Provincia</label>
+          <select id="provinceSelect" disabled>
             <option value="">Seleziona una provincia</option>
-        </select>
+          </select>
 
-        <label for="citySelect">Comune</label>
-        <select id="citySelect" disabled>
+          <label for="citySelect">Comune</label>
+          <select id="citySelect" disabled>
             <option value="">Tutti i comuni</option>
-        </select>
+          </select>
 
-        <button id="showButton" type="button">Mostra punti</button>
-        <button id="resetButton" type="button">Reset</button>
+          <button id="showButton" type="button">Mostra punti</button>
+          <button id="resetButton" type="button">Reset</button>
         </div>
         <div class="panel">
           <h2>Risultati</h2>
           <p id="statusText">Caricamento dati...</p>
+          <div class="status-meta">
+            <h3>Dati stato</h3>
+            <div class="meta-grid">
+              <strong>File stato sorgente</strong>
+              <span id="statusSourceFile">Caricamento...</span>
+              <strong>Ultimo aggiornamento stato</strong>
+              <span id="statusUpdatedAt">Caricamento...</span>
+            </div>
+          </div>
         </div>
       </aside>
 
