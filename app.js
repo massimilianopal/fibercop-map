@@ -1,19 +1,27 @@
 const BASE_DATA_URL = "./data/base_points.json";
 const STATUS_DATA_URL = "./data/status_points.json";
-const REGIONAL_GEOJSON_BASE_URL = "./data/geojson/regions";
+const MUNICIPALITY_GEOJSON_BASE_URL = "./data/geojson/regions";
+const PROVINCE_GEOJSON_BASE_URL = "./data/geojson/provinces";
 
 const DEFAULT_MAP_CENTER = [42.5, 12.5];
 const DEFAULT_MAP_ZOOM = 6;
+const FIXED_STATUS_OPTIONS = ["ATTIVO", "PIANIFICATO", "DISPONIBILE"];
 const MUNICIPALITY_NAME_ALIASES = {
   "POPOLI TERME": "POPOLI",
-  "JONADI": "IONADI",
+  JONADI: "IONADI",
   "REGGIO CALABRIA": "REGGIO DI CALABRIA",
   "MONTAGNA SULLA STRADA DEL VINO": "MONTAGNA",
+};
+const PROVINCE_NAME_ALIASES = {
+  "REGGIO CALABRIA": "REGGIO DI CALABRIA",
+  "REGGIO EMILIA": "REGGIO NELLEMILIA",
+  AOSTA: "VALLE DAOSTA",
 };
 
 const regionSelect = document.getElementById("regionSelect");
 const provinceSelect = document.getElementById("provinceSelect");
 const citySelect = document.getElementById("citySelect");
+const stateSelect = document.getElementById("stateSelect");
 const showButton = document.getElementById("showButton");
 const resetButton = document.getElementById("resetButton");
 const statusText = document.getElementById("statusText");
@@ -27,7 +35,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
 
-const municipalityLayer = L.geoJSON(null, {
+const selectedAreaLayer = L.geoJSON(null, {
   style: {
     color: "#2563eb",
     weight: 3,
@@ -38,13 +46,15 @@ const municipalityLayer = L.geoJSON(null, {
 }).addTo(map);
 
 let allPoints = [];
-let markersLayer = L.layerGroup().addTo(map);
+const markersLayer = L.layerGroup().addTo(map);
 let statusMetadata = {
   source_file: "",
   updated_at: "",
 };
-const regionalGeoJsonRequests = new Map();
-const regionalMunicipalityIndexes = new Map();
+const municipalityGeoJsonRequests = new Map();
+const municipalityIndexes = new Map();
+const provinceGeoJsonRequests = new Map();
+const provinceIndexes = new Map();
 let activeRenderRequestId = 0;
 
 function escapeHtml(value) {
@@ -70,6 +80,10 @@ function normalizeLookupValue(value) {
     .trim();
 }
 
+function getCurrentStatus(point) {
+  return normalize(point.current_stato);
+}
+
 function buildRegionGeoJsonSlug(regionName) {
   return normalize(regionName)
     .normalize("NFD")
@@ -82,9 +96,9 @@ function buildRegionGeoJsonSlug(regionName) {
     .toLowerCase();
 }
 
-function buildRegionGeoJsonUrl(regionName) {
+function buildRegionGeoJsonUrl(regionName, baseUrl) {
   const regionSlug = buildRegionGeoJsonSlug(regionName);
-  return regionSlug ? `${REGIONAL_GEOJSON_BASE_URL}/${regionSlug}.geojson` : "";
+  return regionSlug ? `${baseUrl}/${regionSlug}.geojson` : "";
 }
 
 function createLookupVariants(value, options = {}) {
@@ -108,7 +122,7 @@ function createLookupVariants(value, options = {}) {
     addVariant(slashPart);
   }
 
-  // Some bilingual names use a hyphen between the Italian and minority-language names.
+  // Some bilingual labels use a hyphen between the Italian and minority-language names.
   if (rawValue.includes("-")) {
     const hyphenParts = rawValue.split("-").map((part) => part.trim()).filter(Boolean);
 
@@ -129,7 +143,9 @@ function createMunicipalityLookupVariants(value) {
 }
 
 function createProvinceLookupVariants(value) {
-  return createLookupVariants(value);
+  return createLookupVariants(value, {
+    aliases: PROVINCE_NAME_ALIASES,
+  });
 }
 
 function formatDisplayValue(value) {
@@ -177,13 +193,14 @@ function getSelectedFilters() {
     region: normalize(regionSelect.value),
     province: normalize(provinceSelect.value),
     city: normalize(citySelect.value),
+    status: normalize(stateSelect.value),
   };
 }
 
 function populateRegions(points) {
   regionSelect.innerHTML = '<option value="">Seleziona una regione</option>';
 
-  const regions = [...new Set(points.map((p) => normalize(p.regione)).filter(Boolean))].sort();
+  const regions = [...new Set(points.map((point) => normalize(point.regione)).filter(Boolean))].sort();
 
   for (const region of regions) {
     const option = document.createElement("option");
@@ -206,8 +223,8 @@ function populateProvinces(points, selectedRegion) {
   const provinces = [
     ...new Set(
       points
-        .filter((p) => normalize(p.regione) === selectedRegion)
-        .map((p) => normalize(p.provincia))
+        .filter((point) => normalize(point.regione) === selectedRegion)
+        .map((point) => normalize(point.provincia))
         .filter(Boolean)
     ),
   ].sort();
@@ -234,11 +251,11 @@ function populateCities(points, selectedRegion, selectedProvince) {
     ...new Set(
       points
         .filter(
-          (p) =>
-            normalize(p.regione) === selectedRegion &&
-            normalize(p.provincia) === selectedProvince
+          (point) =>
+            normalize(point.regione) === selectedRegion &&
+            normalize(point.provincia) === selectedProvince
         )
-        .map((p) => normalize(p.comune))
+        .map((point) => normalize(point.comune))
         .filter(Boolean)
     ),
   ].sort();
@@ -253,16 +270,43 @@ function populateCities(points, selectedRegion, selectedProvince) {
   citySelect.disabled = false;
 }
 
+function populateStateOptions(points) {
+  const selectedValue = normalize(stateSelect.value);
+  const dynamicStates = [...new Set(points.map(getCurrentStatus).filter(Boolean))].sort();
+  const stateOptions = [...new Set([...FIXED_STATUS_OPTIONS, ...dynamicStates])];
+
+  stateSelect.innerHTML = '<option value="">Tutti gli stati</option>';
+
+  for (const state of stateOptions) {
+    const option = document.createElement("option");
+    option.value = state;
+    option.textContent = state;
+    stateSelect.appendChild(option);
+  }
+
+  if (selectedValue && stateOptions.includes(selectedValue)) {
+    stateSelect.value = selectedValue;
+  }
+}
+
 function hasAreaMismatch(point, selectedArea) {
   if (!selectedArea) {
     return false;
   }
 
-  return (
-    normalize(point.regione) !== selectedArea.region ||
-    normalize(point.provincia) !== selectedArea.province ||
-    normalize(point.comune) !== selectedArea.city
-  );
+  if (selectedArea.region && normalize(point.regione) !== selectedArea.region) {
+    return true;
+  }
+
+  if (selectedArea.province && normalize(point.provincia) !== selectedArea.province) {
+    return true;
+  }
+
+  if (selectedArea.city && normalize(point.comune) !== selectedArea.city) {
+    return true;
+  }
+
+  return false;
 }
 
 function buildPopup(point, options = {}) {
@@ -302,8 +346,8 @@ function clearMarkers() {
   markersLayer.clearLayers();
 }
 
-function clearMunicipalityOverlay() {
-  municipalityLayer.clearLayers();
+function clearAreaOverlay() {
+  selectedAreaLayer.clearLayers();
 }
 
 function setDefaultMapView() {
@@ -312,6 +356,14 @@ function setDefaultMapView() {
 
 function invalidatePendingRender() {
   activeRenderRequestId += 1;
+}
+
+function applyStatusFilter(points, selectedStatus) {
+  if (!selectedStatus) {
+    return points;
+  }
+
+  return points.filter((point) => getCurrentStatus(point) === selectedStatus);
 }
 
 function getAdministrativeFilteredPoints(filters, sourcePoints = allPoints) {
@@ -328,7 +380,11 @@ function getAdministrativeFilteredPoints(filters, sourcePoints = allPoints) {
 }
 
 function shouldUseMunicipalityGeographicFilter(filters) {
-  return Boolean(filters.region && filters.city);
+  return Boolean(filters.region && filters.province && filters.city);
+}
+
+function shouldUseProvinceGeographicFilter(filters) {
+  return Boolean(filters.region && filters.province && !filters.city);
 }
 
 function buildMunicipalityFeatureKey(city, province) {
@@ -368,17 +424,35 @@ function buildMunicipalityIndex(geoJson) {
   };
 }
 
-async function loadRegionMunicipalityData(regionName) {
+function buildProvinceIndex(geoJson) {
+  const byProvince = new Map();
+
+  for (const feature of geoJson.features ?? []) {
+    const provinceVariants = createProvinceLookupVariants(feature?.properties?.prov_name);
+
+    for (const provinceVariant of provinceVariants) {
+      if (!byProvince.has(provinceVariant)) {
+        byProvince.set(provinceVariant, feature);
+      }
+    }
+  }
+
+  return {
+    byProvince,
+  };
+}
+
+async function loadRegionalGeoJsonData(regionName, baseUrl, requestCache, indexCache, indexBuilder) {
   const regionSlug = buildRegionGeoJsonSlug(regionName);
 
   if (!regionSlug) {
     return null;
   }
 
-  if (!regionalGeoJsonRequests.has(regionSlug)) {
-    regionalGeoJsonRequests.set(
+  if (!requestCache.has(regionSlug)) {
+    requestCache.set(
       regionSlug,
-      fetch(buildRegionGeoJsonUrl(regionName))
+      fetch(buildRegionGeoJsonUrl(regionName, baseUrl))
         .then((response) => {
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -387,28 +461,48 @@ async function loadRegionMunicipalityData(regionName) {
           return response.json();
         })
         .then((geoJson) => {
-          regionalMunicipalityIndexes.set(regionSlug, buildMunicipalityIndex(geoJson));
+          indexCache.set(regionSlug, indexBuilder(geoJson));
           return geoJson;
         })
         .catch((error) => {
-          regionalGeoJsonRequests.delete(regionSlug);
-          regionalMunicipalityIndexes.delete(regionSlug);
+          requestCache.delete(regionSlug);
+          indexCache.delete(regionSlug);
           throw error;
         })
     );
   }
 
-  const geoJson = await regionalGeoJsonRequests.get(regionSlug);
+  const geoJson = await requestCache.get(regionSlug);
 
-  if (!regionalMunicipalityIndexes.has(regionSlug)) {
-    regionalMunicipalityIndexes.set(regionSlug, buildMunicipalityIndex(geoJson));
+  if (!indexCache.has(regionSlug)) {
+    indexCache.set(regionSlug, indexBuilder(geoJson));
   }
 
   return {
     regionSlug,
     geoJson,
-    municipalityIndex: regionalMunicipalityIndexes.get(regionSlug),
+    featureIndex: indexCache.get(regionSlug),
   };
+}
+
+function loadRegionMunicipalityData(regionName) {
+  return loadRegionalGeoJsonData(
+    regionName,
+    MUNICIPALITY_GEOJSON_BASE_URL,
+    municipalityGeoJsonRequests,
+    municipalityIndexes,
+    buildMunicipalityIndex
+  );
+}
+
+function loadRegionProvinceData(regionName) {
+  return loadRegionalGeoJsonData(
+    regionName,
+    PROVINCE_GEOJSON_BASE_URL,
+    provinceGeoJsonRequests,
+    provinceIndexes,
+    buildProvinceIndex
+  );
 }
 
 function findMunicipalityFeature(municipalityIndex, selectedCity, selectedProvince) {
@@ -438,17 +532,31 @@ function findMunicipalityFeature(municipalityIndex, selectedCity, selectedProvin
   return null;
 }
 
+function findProvinceFeature(provinceIndex, selectedProvince) {
+  const provinceVariants = createProvinceLookupVariants(selectedProvince);
+
+  for (const provinceVariant of provinceVariants) {
+    const feature = provinceIndex.byProvince.get(provinceVariant);
+
+    if (feature) {
+      return feature;
+    }
+  }
+
+  return null;
+}
+
 function isPointInsideBbox(lat, lon, bbox) {
   const [minLon, minLat, maxLon, maxLat] = bbox;
   return lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat;
 }
 
-function filterPointsWithinMunicipality(points, municipalityFeature) {
+function filterPointsWithinArea(points, areaFeature) {
   if (!window.turf) {
     throw new Error("Turf.js non disponibile.");
   }
 
-  const municipalityBbox = turf.bbox(municipalityFeature);
+  const areaBbox = turf.bbox(areaFeature);
 
   return points.filter((point) => {
     const lat = Number(point.lat);
@@ -459,62 +567,60 @@ function filterPointsWithinMunicipality(points, municipalityFeature) {
     }
 
     // Cheap pre-check before the exact point-in-polygon test.
-    if (!isPointInsideBbox(lat, lon, municipalityBbox)) {
+    if (!isPointInsideBbox(lat, lon, areaBbox)) {
       return false;
     }
 
-    return turf.booleanPointInPolygon(turf.point([lon, lat]), municipalityFeature);
+    return turf.booleanPointInPolygon(turf.point([lon, lat]), areaFeature);
   });
 }
 
-async function resolveFilteredPoints(filters) {
+function createAdministrativeResult(filters, options = {}) {
   const administrativePoints = getAdministrativeFilteredPoints(filters);
 
-  // Keep the current administrative flow unless a municipality is selected.
-  if (!shouldUseMunicipalityGeographicFilter(filters)) {
-    return {
-      points: administrativePoints,
-      municipalityFeature: null,
-      selectedArea: null,
-      mode: "administrative",
-      fallbackUsed: false,
-    };
-  }
+  return {
+    points: applyStatusFilter(administrativePoints, filters.status),
+    areaFeature: null,
+    selectedArea: null,
+    mode: "administrative",
+    fallbackUsed: options.fallbackUsed ?? false,
+  };
+}
 
+async function resolveMunicipalityGeographicResult(filters, fallbackResult) {
   try {
     const regionData = await loadRegionMunicipalityData(filters.region);
 
     if (!regionData) {
       return {
-        points: administrativePoints,
-        municipalityFeature: null,
-        selectedArea: null,
-        mode: "administrative",
+        ...fallbackResult,
         fallbackUsed: true,
       };
     }
 
-    const { municipalityIndex, regionSlug } = regionData;
     const municipalityFeature = findMunicipalityFeature(
-      municipalityIndex,
+      regionData.featureIndex,
       filters.city,
       filters.province
     );
 
     if (!municipalityFeature) {
-      console.warn("Comune non trovato nel GeoJSON regionale:", filters.region, regionSlug, filters.city);
+      console.warn(
+        "Comune non trovato nel GeoJSON regionale:",
+        filters.region,
+        regionData.regionSlug,
+        filters.city
+      );
+
       return {
-        points: administrativePoints,
-        municipalityFeature: null,
-        selectedArea: null,
-        mode: "administrative",
+        ...fallbackResult,
         fallbackUsed: true,
       };
     }
 
     return {
-      points: filterPointsWithinMunicipality(allPoints, municipalityFeature),
-      municipalityFeature,
+      points: applyStatusFilter(filterPointsWithinArea(allPoints, municipalityFeature), filters.status),
+      areaFeature: municipalityFeature,
       selectedArea: {
         region: filters.region,
         province: filters.province,
@@ -524,23 +630,120 @@ async function resolveFilteredPoints(filters) {
       fallbackUsed: false,
     };
   } catch (error) {
-    console.warn("Filtro geografico non disponibile, uso fallback anagrafico:", error);
+    console.warn("Filtro geografico comunale non disponibile, uso fallback anagrafico:", error);
     return {
-      points: administrativePoints,
-      municipalityFeature: null,
-      selectedArea: null,
-      mode: "administrative",
+      ...fallbackResult,
       fallbackUsed: true,
     };
   }
 }
 
-function fitMapToResults(markerBounds, municipalityFeature) {
-  if (municipalityFeature) {
-    const municipalityBounds = municipalityLayer.getBounds();
+async function resolveProvinceGeographicResult(filters, fallbackResult) {
+  try {
+    const regionData = await loadRegionProvinceData(filters.region);
 
-    if (municipalityBounds.isValid()) {
-      map.fitBounds(municipalityBounds, { padding: [20, 20] });
+    if (!regionData) {
+      return {
+        ...fallbackResult,
+        fallbackUsed: true,
+      };
+    }
+
+    const provinceFeature = findProvinceFeature(regionData.featureIndex, filters.province);
+
+    if (!provinceFeature) {
+      console.warn(
+        "Provincia non trovata nel GeoJSON regionale:",
+        filters.region,
+        regionData.regionSlug,
+        filters.province
+      );
+
+      return {
+        ...fallbackResult,
+        fallbackUsed: true,
+      };
+    }
+
+    return {
+      points: applyStatusFilter(filterPointsWithinArea(allPoints, provinceFeature), filters.status),
+      areaFeature: provinceFeature,
+      selectedArea: {
+        region: filters.region,
+        province: filters.province,
+      },
+      mode: "province-geographic",
+      fallbackUsed: false,
+    };
+  } catch (error) {
+    console.warn("Filtro geografico provinciale non disponibile, uso fallback anagrafico:", error);
+    return {
+      ...fallbackResult,
+      fallbackUsed: true,
+    };
+  }
+}
+
+async function resolveFilteredPoints(filters) {
+  const fallbackResult = createAdministrativeResult(filters);
+
+  if (shouldUseMunicipalityGeographicFilter(filters)) {
+    return resolveMunicipalityGeographicResult(filters, fallbackResult);
+  }
+
+  if (shouldUseProvinceGeographicFilter(filters)) {
+    return resolveProvinceGeographicResult(filters, fallbackResult);
+  }
+
+  return fallbackResult;
+}
+
+function getMarkerStatusClass(point) {
+  switch (getCurrentStatus(point)) {
+    case "ATTIVO":
+      return "point-marker--active";
+    case "PIANIFICATO":
+      return "point-marker--planned";
+    case "DISPONIBILE":
+      return "point-marker--available";
+    default:
+      return "point-marker--unknown";
+  }
+}
+
+function createPointMarker(point, options = {}) {
+  const lat = Number(point.lat);
+  const lon = Number(point.lon);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  const marker = L.marker([lat, lon], {
+    icon: L.divIcon({
+      className: "point-marker-icon",
+      html: `<span class="point-marker ${getMarkerStatusClass(point)}"></span>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+      popupAnchor: [0, -10],
+    }),
+  });
+
+  marker.bindPopup(
+    buildPopup(point, {
+      selectedArea: options.selectedArea,
+    })
+  );
+
+  return marker;
+}
+
+function fitMapToResults(markerBounds, areaFeature) {
+  if (areaFeature) {
+    const areaBounds = selectedAreaLayer.getBounds();
+
+    if (areaBounds.isValid()) {
+      map.fitBounds(areaBounds, { padding: [20, 20] });
       return;
     }
   }
@@ -555,36 +758,31 @@ function fitMapToResults(markerBounds, municipalityFeature) {
 
 function renderPoints(points, options = {}) {
   clearMarkers();
-  clearMunicipalityOverlay();
+  clearAreaOverlay();
 
-  if (options.municipalityFeature) {
-    municipalityLayer.addData(options.municipalityFeature);
+  if (options.areaFeature) {
+    selectedAreaLayer.addData(options.areaFeature);
   }
 
   const markerBounds = [];
-  const uniqueCities = [...new Set(points.map((p) => normalize(p.comune)).filter(Boolean))].sort();
+  const uniqueCities = [...new Set(points.map((point) => normalize(point.comune)).filter(Boolean))].sort();
 
   for (const point of points) {
-    const lat = Number(point.lat);
-    const lon = Number(point.lon);
+    const marker = createPointMarker(point, {
+      selectedArea: options.selectedArea,
+    });
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    if (!marker) {
       continue;
     }
 
-    const marker = L.marker([lat, lon]);
-    marker.bindPopup(
-      buildPopup(point, {
-        selectedArea: options.selectedArea,
-      })
-    );
     marker.addTo(markersLayer);
-    markerBounds.push([lat, lon]);
+    markerBounds.push([Number(point.lat), Number(point.lon)]);
   }
 
-  fitMapToResults(markerBounds, options.municipalityFeature);
+  fitMapToResults(markerBounds, options.areaFeature);
 
-  if (!points.length && !options.municipalityFeature) {
+  if (!points.length && !options.areaFeature) {
     statusText.textContent = "Nessun punto trovato per il filtro selezionato.";
     return;
   }
@@ -592,9 +790,10 @@ function renderPoints(points, options = {}) {
   const region = regionSelect.value || "-";
   const province = provinceSelect.value || "-";
   const city = citySelect.value || "Tutti i comuni";
+  const state = stateSelect.value || "Tutti gli stati";
 
   statusText.textContent =
-    `Regione: ${region} | Provincia: ${province} | Comune: ${city} | ` +
+    `Regione: ${region} | Provincia: ${province} | Comune: ${city} | Stato: ${state} | ` +
     `Punti mostrati: ${points.length} | Comuni distinti nel risultato: ${uniqueCities.length}`;
 }
 
@@ -605,7 +804,7 @@ function handleRegionChange() {
   populateProvinces(allPoints, selectedRegion);
 
   clearMarkers();
-  clearMunicipalityOverlay();
+  clearAreaOverlay();
   statusText.textContent = selectedRegion
     ? "Regione selezionata. Ora scegli una provincia."
     : "Seleziona una regione e una provincia per visualizzare i punti.";
@@ -621,7 +820,7 @@ function handleProvinceChange() {
   populateCities(allPoints, selectedRegion, selectedProvince);
 
   clearMarkers();
-  clearMunicipalityOverlay();
+  clearAreaOverlay();
 
   if (!selectedRegion || !selectedProvince) {
     statusText.textContent = "Seleziona una provincia per continuare.";
@@ -630,7 +829,7 @@ function handleProvinceChange() {
   }
 
   statusText.textContent =
-    "Provincia selezionata. Scegli un comune oppure lascia 'Tutti i comuni', poi premi 'Mostra punti'.";
+    "Provincia selezionata. Scegli un comune, imposta uno stato se serve, poi premi 'Mostra punti'.";
   setDefaultMapView();
 }
 
@@ -640,13 +839,29 @@ function handleCityChange() {
   statusText.textContent = `Comune selezionato: ${selectedCity}. Premi 'Mostra punti'.`;
 }
 
+function handleStateChange() {
+  invalidatePendingRender();
+  const selectedState = stateSelect.value || "Tutti gli stati";
+  statusText.textContent = `Stato selezionato: ${selectedState}. Premi 'Mostra punti'.`;
+}
+
+function getLoadingMessage(filters) {
+  if (shouldUseMunicipalityGeographicFilter(filters)) {
+    return `Caricamento del confine comunale di ${citySelect.value}...`;
+  }
+
+  if (shouldUseProvinceGeographicFilter(filters)) {
+    return `Caricamento del confine provinciale di ${provinceSelect.value}...`;
+  }
+
+  return "Applicazione dei filtri...";
+}
+
 async function handleShowPoints() {
   const filters = getSelectedFilters();
   const requestId = ++activeRenderRequestId;
 
-  if (shouldUseMunicipalityGeographicFilter(filters)) {
-    statusText.textContent = `Caricamento del confine comunale di ${citySelect.value}...`;
-  }
+  statusText.textContent = getLoadingMessage(filters);
 
   const result = await resolveFilteredPoints(filters);
 
@@ -654,10 +869,10 @@ async function handleShowPoints() {
     return;
   }
 
-  const uniqueCities = [...new Set(result.points.map((p) => normalize(p.comune)).filter(Boolean))].sort();
+  const uniqueCities = [...new Set(result.points.map((point) => normalize(point.comune)).filter(Boolean))].sort();
 
   renderPoints(result.points, {
-    municipalityFeature: result.municipalityFeature,
+    areaFeature: result.areaFeature,
     selectedArea: result.selectedArea,
   });
 
@@ -665,6 +880,7 @@ async function handleShowPoints() {
     regione: regionSelect.value,
     provincia: provinceSelect.value,
     comune: citySelect.value || "(tutti)",
+    stato: stateSelect.value || "(tutti)",
     modalita: result.mode,
     fallback: result.fallbackUsed,
     risultati: result.points.length,
@@ -684,8 +900,10 @@ function resetFilters() {
   citySelect.innerHTML = '<option value="">Tutti i comuni</option>';
   citySelect.disabled = true;
 
+  stateSelect.value = "";
+
   clearMarkers();
-  clearMunicipalityOverlay();
+  clearAreaOverlay();
   statusText.textContent =
     "Seleziona una regione e una provincia per visualizzare i punti.";
   setDefaultMapView();
@@ -723,6 +941,7 @@ async function loadData() {
 
     allPoints = mergePointsWithStatus(basePoints, statusData?.items ?? {});
     populateRegions(allPoints);
+    populateStateOptions(allPoints);
     renderStatusMetadata();
     statusText.textContent =
       "Seleziona una regione e una provincia per visualizzare i punti.";
@@ -736,6 +955,7 @@ async function loadData() {
 regionSelect.addEventListener("change", handleRegionChange);
 provinceSelect.addEventListener("change", handleProvinceChange);
 citySelect.addEventListener("change", handleCityChange);
+stateSelect.addEventListener("change", handleStateChange);
 showButton.addEventListener("click", handleShowPoints);
 resetButton.addEventListener("click", resetFilters);
 

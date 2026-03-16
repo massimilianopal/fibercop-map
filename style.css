@@ -102,6 +102,36 @@ button:hover {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
+.point-marker-icon {
+  background: transparent;
+  border: none;
+}
+
+.point-marker {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.35);
+}
+
+.point-marker--active {
+  background: #16a34a;
+}
+
+.point-marker--planned {
+  background: #f97316;
+}
+
+.point-marker--available {
+  background: #2563eb;
+}
+
+.point-marker--unknown {
+  background: #6b7280;
+}
+
 .leaflet-popup-content {
   font-size: 14px;
   line-height: 1.4;
