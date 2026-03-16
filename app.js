@@ -1,12 +1,14 @@
 const BASE_DATA_URL = "./data/base_points.json";
 const STATUS_DATA_URL = "./data/status_points.json";
-const ABRUZZO_GEOJSON_URL = "./data/geojson/regions/abruzzo.geojson";
+const REGIONAL_GEOJSON_BASE_URL = "./data/geojson/regions";
 
 const DEFAULT_MAP_CENTER = [42.5, 12.5];
 const DEFAULT_MAP_ZOOM = 6;
-const MUNICIPALITY_FILTER_REGION = "ABRUZZO";
 const MUNICIPALITY_NAME_ALIASES = {
   "POPOLI TERME": "POPOLI",
+  "JONADI": "IONADI",
+  "REGGIO CALABRIA": "REGGIO DI CALABRIA",
+  "MONTAGNA SULLA STRADA DEL VINO": "MONTAGNA",
 };
 
 const regionSelect = document.getElementById("regionSelect");
@@ -41,8 +43,8 @@ let statusMetadata = {
   source_file: "",
   updated_at: "",
 };
-let abruzzoGeoJsonPromise = null;
-let abruzzoMunicipalityIndex = null;
+const regionalGeoJsonRequests = new Map();
+const regionalMunicipalityIndexes = new Map();
 let activeRenderRequestId = 0;
 
 function escapeHtml(value) {
@@ -58,7 +60,7 @@ function normalize(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
-function normalizeGeoLookupValue(value) {
+function normalizeLookupValue(value) {
   return normalize(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -68,9 +70,66 @@ function normalizeGeoLookupValue(value) {
     .trim();
 }
 
-function normalizeMunicipalityLookup(value) {
-  const normalizedValue = normalizeGeoLookupValue(value);
-  return MUNICIPALITY_NAME_ALIASES[normalizedValue] ?? normalizedValue;
+function buildRegionGeoJsonSlug(regionName) {
+  return normalize(regionName)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split("/")[0]
+    .replace(/['`\u2019]/g, "")
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
+
+function buildRegionGeoJsonUrl(regionName) {
+  const regionSlug = buildRegionGeoJsonSlug(regionName);
+  return regionSlug ? `${REGIONAL_GEOJSON_BASE_URL}/${regionSlug}.geojson` : "";
+}
+
+function createLookupVariants(value, options = {}) {
+  const rawValue = String(value ?? "").trim();
+  const aliases = options.aliases ?? {};
+  const variants = new Set();
+
+  function addVariant(candidate) {
+    const normalizedCandidate = normalizeLookupValue(candidate);
+
+    if (!normalizedCandidate) {
+      return;
+    }
+
+    variants.add(aliases[normalizedCandidate] ?? normalizedCandidate);
+  }
+
+  addVariant(rawValue);
+
+  for (const slashPart of rawValue.split("/")) {
+    addVariant(slashPart);
+  }
+
+  // Some bilingual names use a hyphen between the Italian and minority-language names.
+  if (rawValue.includes("-")) {
+    const hyphenParts = rawValue.split("-").map((part) => part.trim()).filter(Boolean);
+
+    if (hyphenParts.length === 2 && hyphenParts.every((part) => part.includes(" "))) {
+      for (const hyphenPart of hyphenParts) {
+        addVariant(hyphenPart);
+      }
+    }
+  }
+
+  return [...variants];
+}
+
+function createMunicipalityLookupVariants(value) {
+  return createLookupVariants(value, {
+    aliases: MUNICIPALITY_NAME_ALIASES,
+  });
+}
+
+function createProvinceLookupVariants(value) {
+  return createLookupVariants(value);
 }
 
 function formatDisplayValue(value) {
@@ -269,65 +328,114 @@ function getAdministrativeFilteredPoints(filters, sourcePoints = allPoints) {
 }
 
 function shouldUseMunicipalityGeographicFilter(filters) {
-  return filters.region === MUNICIPALITY_FILTER_REGION && Boolean(filters.city);
+  return Boolean(filters.region && filters.city);
 }
 
 function buildMunicipalityFeatureKey(city, province) {
-  return `${normalizeMunicipalityLookup(city)}::${normalizeGeoLookupValue(province)}`;
+  return `${city}::${province}`;
 }
 
 function buildMunicipalityIndex(geoJson) {
-  const municipalityIndex = new Map();
+  const byCity = new Map();
+  const byCityProvince = new Map();
 
   for (const feature of geoJson.features ?? []) {
-    const cityName = feature?.properties?.name;
-    const provinceName = feature?.properties?.prov_name;
+    const cityVariants = createMunicipalityLookupVariants(feature?.properties?.name);
+    const provinceVariants = createProvinceLookupVariants(feature?.properties?.prov_name);
 
-    if (!cityName || !provinceName) {
+    if (!cityVariants.length) {
       continue;
     }
 
-    municipalityIndex.set(buildMunicipalityFeatureKey(cityName, provinceName), feature);
-  }
+    for (const cityVariant of cityVariants) {
+      if (!byCity.has(cityVariant)) {
+        byCity.set(cityVariant, feature);
+      }
 
-  return municipalityIndex;
-}
+      for (const provinceVariant of provinceVariants) {
+        const featureKey = buildMunicipalityFeatureKey(cityVariant, provinceVariant);
 
-async function loadAbruzzoMunicipalityData() {
-  if (!abruzzoGeoJsonPromise) {
-    abruzzoGeoJsonPromise = fetch(ABRUZZO_GEOJSON_URL)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+        if (!byCityProvince.has(featureKey)) {
+          byCityProvince.set(featureKey, feature);
         }
-
-        return response.json();
-      })
-      .then((geoJson) => {
-        abruzzoMunicipalityIndex = buildMunicipalityIndex(geoJson);
-        return geoJson;
-      })
-      .catch((error) => {
-        abruzzoGeoJsonPromise = null;
-        abruzzoMunicipalityIndex = null;
-        throw error;
-      });
-  }
-
-  const geoJson = await abruzzoGeoJsonPromise;
-
-  if (!abruzzoMunicipalityIndex) {
-    abruzzoMunicipalityIndex = buildMunicipalityIndex(geoJson);
+      }
+    }
   }
 
   return {
+    byCity,
+    byCityProvince,
+  };
+}
+
+async function loadRegionMunicipalityData(regionName) {
+  const regionSlug = buildRegionGeoJsonSlug(regionName);
+
+  if (!regionSlug) {
+    return null;
+  }
+
+  if (!regionalGeoJsonRequests.has(regionSlug)) {
+    regionalGeoJsonRequests.set(
+      regionSlug,
+      fetch(buildRegionGeoJsonUrl(regionName))
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          return response.json();
+        })
+        .then((geoJson) => {
+          regionalMunicipalityIndexes.set(regionSlug, buildMunicipalityIndex(geoJson));
+          return geoJson;
+        })
+        .catch((error) => {
+          regionalGeoJsonRequests.delete(regionSlug);
+          regionalMunicipalityIndexes.delete(regionSlug);
+          throw error;
+        })
+    );
+  }
+
+  const geoJson = await regionalGeoJsonRequests.get(regionSlug);
+
+  if (!regionalMunicipalityIndexes.has(regionSlug)) {
+    regionalMunicipalityIndexes.set(regionSlug, buildMunicipalityIndex(geoJson));
+  }
+
+  return {
+    regionSlug,
     geoJson,
-    municipalityIndex: abruzzoMunicipalityIndex,
+    municipalityIndex: regionalMunicipalityIndexes.get(regionSlug),
   };
 }
 
 function findMunicipalityFeature(municipalityIndex, selectedCity, selectedProvince) {
-  return municipalityIndex.get(buildMunicipalityFeatureKey(selectedCity, selectedProvince)) ?? null;
+  const cityVariants = createMunicipalityLookupVariants(selectedCity);
+  const provinceVariants = createProvinceLookupVariants(selectedProvince);
+
+  for (const cityVariant of cityVariants) {
+    for (const provinceVariant of provinceVariants) {
+      const feature = municipalityIndex.byCityProvince.get(
+        buildMunicipalityFeatureKey(cityVariant, provinceVariant)
+      );
+
+      if (feature) {
+        return feature;
+      }
+    }
+  }
+
+  for (const cityVariant of cityVariants) {
+    const feature = municipalityIndex.byCity.get(cityVariant);
+
+    if (feature) {
+      return feature;
+    }
+  }
+
+  return null;
 }
 
 function isPointInsideBbox(lat, lon, bbox) {
@@ -362,7 +470,7 @@ function filterPointsWithinMunicipality(points, municipalityFeature) {
 async function resolveFilteredPoints(filters) {
   const administrativePoints = getAdministrativeFilteredPoints(filters);
 
-  // Keep the current administrative flow unless an Abruzzo municipality is selected.
+  // Keep the current administrative flow unless a municipality is selected.
   if (!shouldUseMunicipalityGeographicFilter(filters)) {
     return {
       points: administrativePoints,
@@ -374,7 +482,19 @@ async function resolveFilteredPoints(filters) {
   }
 
   try {
-    const { municipalityIndex } = await loadAbruzzoMunicipalityData();
+    const regionData = await loadRegionMunicipalityData(filters.region);
+
+    if (!regionData) {
+      return {
+        points: administrativePoints,
+        municipalityFeature: null,
+        selectedArea: null,
+        mode: "administrative",
+        fallbackUsed: true,
+      };
+    }
+
+    const { municipalityIndex, regionSlug } = regionData;
     const municipalityFeature = findMunicipalityFeature(
       municipalityIndex,
       filters.city,
@@ -382,7 +502,7 @@ async function resolveFilteredPoints(filters) {
     );
 
     if (!municipalityFeature) {
-      console.warn("Comune non trovato nel GeoJSON Abruzzo:", filters.city, filters.province);
+      console.warn("Comune non trovato nel GeoJSON regionale:", filters.region, regionSlug, filters.city);
       return {
         points: administrativePoints,
         municipalityFeature: null,
