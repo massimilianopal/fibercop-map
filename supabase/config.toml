@@ -1,0 +1,7 @@
+project_id = "rycglipqhsknxfnyytgy"
+
+[functions.telegram-webhook]
+enabled = true
+verify_jwt = false
+import_map = "./functions/telegram-webhook/deno.json"
+entrypoint = "./functions/telegram-webhook/index.ts"
