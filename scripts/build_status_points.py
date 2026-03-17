@@ -15,16 +15,22 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
+
 SOURCE_URL = (
     "https://areaclienti.market.fibercop.com/sitepub/SFTP/"
     "59_Coperture_Bitstream_NGA_e_VULA/Elenco_CRO_CNO.zip"
 )
+
 OUTPUT_JSON = ROOT / "data" / "status_points.json"
+
 SUPPORTED_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
 REQUIRED_COLUMNS = {"ID_ELEMENTO", "STATO", "DATA_DISPONIBILITA"}
+
+# Download tuning
 DOWNLOAD_TIMEOUT_SECONDS = 180
 DOWNLOAD_MAX_ATTEMPTS = 3
 DOWNLOAD_BACKOFF_BASE_SECONDS = 5
+DOWNLOAD_CHUNK_SIZE = 1024 * 256  # 256 KB
 
 
 class BuildStatusPointsError(Exception):
@@ -36,7 +42,12 @@ def clean_string(value: str | None) -> str:
 
 
 def utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def describe_download_error(error: Exception) -> str:
@@ -57,7 +68,7 @@ def describe_download_error(error: Exception) -> str:
 def raise_download_error(error: Exception, url: str) -> None:
     if isinstance(error, urllib.error.HTTPError):
         raise BuildStatusPointsError(
-            f"Download fallito con HTTP {error.code}: {url}"
+            f"Download fallito con HTTP {error.code} da {url}"
         ) from error
 
     if isinstance(error, urllib.error.URLError):
@@ -70,56 +81,115 @@ def raise_download_error(error: Exception, url: str) -> None:
     if isinstance(error, (TimeoutError, socket.timeout)):
         raise BuildStatusPointsError("Download fallito per timeout.") from error
 
-    raise BuildStatusPointsError(
-        f"Download fallito: {error}"
-    ) from error
+    raise BuildStatusPointsError(f"Download fallito: {error}") from error
 
 
 def retry_wait_seconds(attempt: int) -> int:
     return DOWNLOAD_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
 
 
-def download_zip_bytes(url: str) -> bytes:
-    request = urllib.request.Request(
+def build_request(url: str) -> urllib.request.Request:
+    # User-Agent "umano": molti server/CDN trattano molto meglio richieste così.
+    return urllib.request.Request(
         url,
-        headers={"User-Agent": "fibercop-map-status-builder/1.0"},
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/123.0.0.0 Safari/537.36"
+            ),
+            "Accept": (
+                "application/zip, application/octet-stream, */*;q=0.8"
+            ),
+            "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Connection": "close",
+        },
     )
 
+
+def download_zip_bytes(url: str) -> bytes:
     last_error: Exception | None = None
 
     for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
         print(
-            f"Download FiberCop ZIP: tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS}.",
+            (
+                f"Download FiberCop ZIP: tentativo "
+                f"{attempt}/{DOWNLOAD_MAX_ATTEMPTS} "
+                f"(timeout {DOWNLOAD_TIMEOUT_SECONDS}s)"
+            ),
             file=sys.stderr,
         )
 
+        request = build_request(url)
+        started_at = time.time()
+
         try:
-            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+            with urllib.request.urlopen(
+                request,
+                timeout=DOWNLOAD_TIMEOUT_SECONDS,
+            ) as response:
                 content_type = clean_string(response.headers.get("Content-Type"))
-                if content_type and "zip" not in content_type.lower():
+                content_length = clean_string(response.headers.get("Content-Length"))
+
+                if content_type:
                     print(
-                        "Avviso: il server ha risposto con un Content-Type inatteso "
-                        f"per uno ZIP: {content_type}",
+                        f"Content-Type risposta: {content_type}",
+                        file=sys.stderr,
+                    )
+                if content_length:
+                    print(
+                        f"Content-Length dichiarato: {content_length} byte",
                         file=sys.stderr,
                     )
 
-                return response.read()
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+                chunks: list[bytes] = []
+                total_bytes = 0
+
+                while True:
+                    chunk = response.read(DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    total_bytes += len(chunk)
+
+                elapsed = time.time() - started_at
+                print(
+                    (
+                        f"Download completato al tentativo {attempt}: "
+                        f"{total_bytes} byte in {elapsed:.2f}s"
+                    ),
+                    file=sys.stderr,
+                )
+
+                return b"".join(chunks)
+
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            TimeoutError,
+            socket.timeout,
+        ) as exc:
             last_error = exc
             reason = describe_download_error(exc)
 
             if attempt == DOWNLOAD_MAX_ATTEMPTS:
                 print(
-                    f"Tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS} fallito: {reason}. "
-                    "Nessun altro retry disponibile.",
+                    (
+                        f"Tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS} fallito: {reason}. "
+                        "Nessun altro retry disponibile."
+                    ),
                     file=sys.stderr,
                 )
                 break
 
             wait_seconds = retry_wait_seconds(attempt)
             print(
-                f"Tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS} fallito: {reason}. "
-                f"Attendo {wait_seconds} secondi prima del retry.",
+                (
+                    f"Tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS} fallito: {reason}. "
+                    f"Attendo {wait_seconds} secondi prima del retry."
+                ),
                 file=sys.stderr,
             )
             time.sleep(wait_seconds)
@@ -132,7 +202,12 @@ def read_zip_csv(zip_bytes: bytes) -> tuple[str, bytes]:
     try:
         archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile as exc:
-        preview = zip_bytes[:80].decode("utf-8", errors="replace").replace("\r", " ").replace("\n", " ")
+        preview = (
+            zip_bytes[:200]
+            .decode("utf-8", errors="replace")
+            .replace("\r", " ")
+            .replace("\n", " ")
+        )
         raise BuildStatusPointsError(
             "Il file scaricato non e' uno ZIP valido. "
             f"Dimensione risposta: {len(zip_bytes)} byte. "
@@ -141,7 +216,8 @@ def read_zip_csv(zip_bytes: bytes) -> tuple[str, bytes]:
 
     with archive:
         csv_members = [
-            info for info in archive.infolist()
+            info
+            for info in archive.infolist()
             if not info.is_dir() and info.filename.lower().endswith(".csv")
         ]
 
@@ -163,7 +239,6 @@ def open_csv_reader(
 ) -> tuple[csv.DictReader, dict[str, str], str]:
     errors = []
 
-    # Accetta solo una decodifica che espone davvero le colonne richieste.
     for encoding in SUPPORTED_ENCODINGS:
         try:
             text = csv_bytes.decode(encoding)
@@ -178,6 +253,7 @@ def open_csv_reader(
             for name in fieldnames
             if clean_string(name)
         }
+
         missing = sorted(REQUIRED_COLUMNS - set(columns))
         if missing:
             errors.append(
@@ -229,10 +305,10 @@ def build_status_map(
 
         if item_id in items:
             duplicate_rows += 1
+
             if items[item_id] != entry:
                 conflicting_ids.add(item_id)
 
-            # Il formato finale prevede una sola voce per ID_ELEMENTO.
             candidate_score = build_entry_score(entry, row_number)
             if candidate_score >= scores[item_id]:
                 items[item_id] = entry
@@ -243,7 +319,13 @@ def build_status_map(
         scores[item_id] = build_entry_score(entry, row_number)
 
     sorted_items = {key: items[key] for key in sorted(items)}
-    return sorted_items, processed_rows, skipped_rows, duplicate_rows, len(conflicting_ids)
+    return (
+        sorted_items,
+        processed_rows,
+        skipped_rows,
+        duplicate_rows,
+        len(conflicting_ids),
+    )
 
 
 def load_existing_output() -> dict[str, object] | None:
@@ -274,6 +356,7 @@ def data_changed(
 
 def write_output(source_file: str, items: dict[str, dict[str, str]]) -> bool:
     existing_payload = load_existing_output()
+
     if not data_changed(existing_payload, source_file, items):
         return False
 
@@ -295,11 +378,15 @@ def main() -> int:
         zip_bytes = download_zip_bytes(SOURCE_URL)
         source_file, csv_bytes = read_zip_csv(zip_bytes)
         reader, columns, encoding = open_csv_reader(csv_bytes)
-        items, processed_rows, skipped_rows, duplicate_rows, conflicting_ids = build_status_map(
-            reader,
-            columns,
-        )
+        (
+            items,
+            processed_rows,
+            skipped_rows,
+            duplicate_rows,
+            conflicting_ids,
+        ) = build_status_map(reader, columns)
         file_updated = write_output(source_file, items)
+
     except BuildStatusPointsError as exc:
         print(f"Errore: {exc}", file=sys.stderr)
         return 1
@@ -310,12 +397,15 @@ def main() -> int:
     print(f"CSV trovato: {source_file}")
     print(f"Encoding usato: {encoding}")
     print(f"Elaborati {processed_rows} record dal CSV.")
+
     if file_updated:
         print(f"Salvati {len(items)} ID univoci in {OUTPUT_JSON}.")
     else:
         print("No data changes detected; status_points.json left unchanged")
+
     if skipped_rows:
         print(f"Saltate {skipped_rows} righe senza ID_ELEMENTO.")
+
     if duplicate_rows:
         print(
             f"Compattate {duplicate_rows} righe duplicate; "
