@@ -7,6 +7,7 @@ import io
 import json
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -21,6 +22,9 @@ SOURCE_URL = (
 OUTPUT_JSON = ROOT / "data" / "status_points.json"
 SUPPORTED_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
 REQUIRED_COLUMNS = {"ID_ELEMENTO", "STATO", "DATA_DISPONIBILITA"}
+DOWNLOAD_TIMEOUT_SECONDS = 180
+DOWNLOAD_MAX_ATTEMPTS = 3
+DOWNLOAD_BACKOFF_BASE_SECONDS = 5
 
 
 class BuildStatusPointsError(Exception):
@@ -35,32 +39,105 @@ def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def describe_download_error(error: Exception) -> str:
+    if isinstance(error, urllib.error.HTTPError):
+        return f"HTTP {error.code}: {error.reason}"
+
+    if isinstance(error, urllib.error.URLError):
+        if isinstance(error.reason, (TimeoutError, socket.timeout)):
+            return "timeout"
+        return str(error.reason)
+
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return "timeout"
+
+    return str(error)
+
+
+def raise_download_error(error: Exception, url: str) -> None:
+    if isinstance(error, urllib.error.HTTPError):
+        raise BuildStatusPointsError(
+            f"Download fallito con HTTP {error.code}: {url}"
+        ) from error
+
+    if isinstance(error, urllib.error.URLError):
+        if isinstance(error.reason, (TimeoutError, socket.timeout)):
+            raise BuildStatusPointsError("Download fallito per timeout.") from error
+        raise BuildStatusPointsError(
+            f"Download fallito: {error.reason}"
+        ) from error
+
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        raise BuildStatusPointsError("Download fallito per timeout.") from error
+
+    raise BuildStatusPointsError(
+        f"Download fallito: {error}"
+    ) from error
+
+
+def retry_wait_seconds(attempt: int) -> int:
+    return DOWNLOAD_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+
+
 def download_zip_bytes(url: str) -> bytes:
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "fibercop-map-status-builder/1.0"},
     )
 
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            return response.read()
-    except urllib.error.HTTPError as exc:
-        raise BuildStatusPointsError(
-            f"Download fallito con HTTP {exc.code}: {url}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise BuildStatusPointsError(
-            f"Download fallito: {exc.reason}"
-        ) from exc
-    except (TimeoutError, socket.timeout) as exc:
-        raise BuildStatusPointsError("Download fallito per timeout.") from exc
+    last_error: Exception | None = None
+
+    for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
+        print(
+            f"Download FiberCop ZIP: tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS}.",
+            file=sys.stderr,
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                content_type = clean_string(response.headers.get("Content-Type"))
+                if content_type and "zip" not in content_type.lower():
+                    print(
+                        "Avviso: il server ha risposto con un Content-Type inatteso "
+                        f"per uno ZIP: {content_type}",
+                        file=sys.stderr,
+                    )
+
+                return response.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            last_error = exc
+            reason = describe_download_error(exc)
+
+            if attempt == DOWNLOAD_MAX_ATTEMPTS:
+                print(
+                    f"Tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS} fallito: {reason}. "
+                    "Nessun altro retry disponibile.",
+                    file=sys.stderr,
+                )
+                break
+
+            wait_seconds = retry_wait_seconds(attempt)
+            print(
+                f"Tentativo {attempt}/{DOWNLOAD_MAX_ATTEMPTS} fallito: {reason}. "
+                f"Attendo {wait_seconds} secondi prima del retry.",
+                file=sys.stderr,
+            )
+            time.sleep(wait_seconds)
+
+    assert last_error is not None
+    raise_download_error(last_error, url)
 
 
 def read_zip_csv(zip_bytes: bytes) -> tuple[str, bytes]:
     try:
         archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile as exc:
-        raise BuildStatusPointsError("Il file scaricato non e' uno ZIP valido.") from exc
+        preview = zip_bytes[:80].decode("utf-8", errors="replace").replace("\r", " ").replace("\n", " ")
+        raise BuildStatusPointsError(
+            "Il file scaricato non e' uno ZIP valido. "
+            f"Dimensione risposta: {len(zip_bytes)} byte. "
+            f"Anteprima contenuto: {preview!r}"
+        ) from exc
 
     with archive:
         csv_members = [
