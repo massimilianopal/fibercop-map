@@ -2,6 +2,7 @@ const BASE_DATA_URL = "./data/base_points.json";
 const STATUS_DATA_URL = "./data/status_points.json";
 const MUNICIPALITY_GEOJSON_BASE_URL = "./data/geojson/regions";
 const PROVINCE_GEOJSON_BASE_URL = "./data/geojson/provinces";
+const TELEGRAM_BOT_USERNAME = "fibercop_alerts_bot";
 
 const DEFAULT_MAP_CENTER = [42.5, 12.5];
 const DEFAULT_MAP_ZOOM = 6;
@@ -171,6 +172,16 @@ function formatUpdatedAt(value) {
   });
 }
 
+function buildTelegramDeepLink(pointId) {
+  const normalizedPointId = String(pointId ?? "").trim();
+
+  if (!TELEGRAM_BOT_USERNAME || !normalizedPointId) {
+    return "";
+  }
+
+  return `https://t.me/${encodeURIComponent(TELEGRAM_BOT_USERNAME)}?start=${encodeURIComponent(normalizedPointId)}`;
+}
+
 function renderStatusMetadata() {
   statusSourceFile.textContent = statusMetadata.source_file || "Non disponibile";
   statusUpdatedAt.textContent = formatUpdatedAt(statusMetadata.updated_at);
@@ -310,6 +321,7 @@ function hasAreaMismatch(point, selectedArea) {
 }
 
 function buildPopup(point, options = {}) {
+  const telegramDeepLink = buildTelegramDeepLink(point.id);
   const mismatchNotice =
     options.selectedArea && hasAreaMismatch(point, options.selectedArea)
       ? `
@@ -318,6 +330,20 @@ function buildPopup(point, options = {}) {
         </p>
       `
       : "";
+  const telegramAction = telegramDeepLink
+    ? `
+      <div class="popup-actions">
+        <a
+          class="popup-telegram-link"
+          href="${telegramDeepLink}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          🔔 Avvisami su Telegram
+        </a>
+      </div>
+    `
+    : "";
 
   return `
     <div>
@@ -338,6 +364,7 @@ function buildPopup(point, options = {}) {
         <strong>Lat</strong><span>${escapeHtml(point.lat)}</span>
         <strong>Lon</strong><span>${escapeHtml(point.lon)}</span>
       </div>
+      ${telegramAction}
     </div>
   `;
 }

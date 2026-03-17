@@ -61,6 +61,18 @@ body {
   font-size: 18px;
 }
 
+.panel-info {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+}
+
+.panel-note {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1e3a8a;
+}
+
 label {
   display: block;
   margin: 12px 0 6px;
@@ -150,6 +162,25 @@ button:hover {
 
 .popup-grid strong {
   white-space: normal;
+}
+
+.popup-actions {
+  margin-top: 12px;
+}
+
+.popup-telegram-link {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #111827;
+  color: white;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+
+.popup-telegram-link:hover {
+  background: #1f2937;
 }
 
 .popup-alert {
