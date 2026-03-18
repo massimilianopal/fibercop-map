@@ -1,46 +1,37 @@
 # FiberCop Map
 
-FiberCop Map e' una mappa dei punti CRO/CNO FiberCop con stato aggiornato, filtri geografici reali e notifiche Telegram per singolo punto. Il progetto unisce una base dati storica piu' ricca con il file stato aggiornato FiberCop, cosi' da mostrare i punti su mappa e permettere all'utente di seguire le variazioni di stato.
+FiberCop Map e' un progetto informativo dedicato ai punti FiberCop CRO/CNO.
 
-## Funzionalita' principali
+Al momento il progetto e' temporaneamente in revisione. Il sito pubblico mostra
+una homepage informativa e il viewer con mappa non e' attivo in questa fase.
 
-- Visualizzazione dei punti CRO/CNO su mappa interattiva
-- Stato aggiornato del singolo punto
-- Filtri per regione, provincia, comune e stato
-- Filtri geografici reali quando sono disponibili i confini GeoJSON
-- Popup con dettagli del punto selezionato
-- Pulsante Telegram per iscriversi alle notifiche del singolo punto
+## Stato attuale
 
-## Come usare il sito
+- Homepage pubblica temporanea, senza mappa interattiva
+- Caricamento dei dataset pubblici disattivato
+- Repository mantenuto per revisione, documentazione e sviluppo controllato
 
-1. Seleziona regione, provincia e, se vuoi, comune.
-2. Applica un filtro per stato oppure lascia tutti gli stati.
-3. Premi `Mostra punti` per aggiornare la mappa.
-4. Clicca un punto per aprire il popup con i dettagli.
-5. Usa il pulsante Telegram per ricevere notifiche quando quel punto cambia stato.
+## Nota sui dati
 
-## Come funzionano i dati
-
-- `data/base_points.json` contiene la base anagrafica dei punti: coordinate, area geografica, indirizzo e altri campi utili. Viene generato a partire dal file storico piu' ricco del progetto.
-- `data/status_points.json` contiene lo stato aggiornato dei punti e la data di disponibilita'. Viene generato dal file aggiornato FiberCop scaricato automaticamente.
-- Il frontend unisce questi due dataset per mostrare sulla mappa i dati base insieme allo stato piu' recente.
-
-## Aggiornamento automatico
-
-Un workflow GitHub Actions aggiorna `status_points.json` due volte al giorno. Quando vengono rilevati cambi di stato rilevanti, il sistema puo' inviare notifiche Telegram agli utenti iscritti ai singoli punti.
+- Alcuni dati utilizzati dal progetto derivano da fonti pubblicamente accessibili
+- La disponibilita' pubblica di una fonte non implica automaticamente liberta'
+  di riutilizzo o redistribuzione
+- Per questo motivo i file generati `data/base_points.json` e
+  `data/status_points.json` non sono distribuiti pubblicamente in questa fase
+- La riattivazione del viewer completo avverra' solo dopo le verifiche
+  necessarie
 
 ## Stack tecnico
 
-- GitHub Pages per la pubblicazione del sito statico
-- GitHub Actions per aggiornamento dati e automazione
-- Supabase per gestione iscrizioni e integrazione backend
-- Telegram Bot per le notifiche per singolo punto
-- Leaflet per la mappa
-- Turf.js per i filtri geografici reali
+- Sito statico pubblicato con GitHub Pages
+- Frontend HTML, CSS e JavaScript vanilla
+- Leaflet e Turf.js nel viewer completo, quando attivo
+- GitHub Actions per automazioni e aggiornamenti
+- Supabase e Telegram Bot per le funzionalita' di notifica del progetto completo
 
 ## Sviluppo locale
 
-Per avviare il progetto in locale basta servire i file statici dalla root del repository:
+Per servire il progetto in locale dalla root del repository:
 
 ```bash
 python3 -m http.server 8000
@@ -48,6 +39,7 @@ python3 -m http.server 8000
 
 Poi apri `http://localhost:8000`.
 
-## Nota sui dati
+## Modalita' temporanea
 
-I dati ufficiali possono contenere incoerenze geografiche tra coordinate, comune, provincia e regione associati al punto. Quando possibile, il progetto usa filtri geografici reali basati sui confini territoriali; negli altri casi usa il fallback anagrafico presente nei dataset.
+La homepage corrente e' intenzionalmente minimale e non inizializza la mappa
+ne' prova a caricare i dataset JSON rimossi dal tracking Git.

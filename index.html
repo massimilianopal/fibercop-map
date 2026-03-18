@@ -4,85 +4,42 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FiberCop Map</title>
-
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
+    <meta
+      name="description"
+      content="FiberCop Map e' temporaneamente in revisione. La mappa pubblica non e' attiva in questa fase."
     />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <header class="page-header">
-      <div>
+    <main class="page-shell">
+      <header class="page-header">
+        <p class="eyebrow">Stato del progetto</p>
         <h1>FiberCop Map</h1>
         <p class="subtitle">
-          Mappa CRO/CNO con filtro per regione e provincia
+          Progetto informativo dedicato alla consultazione dei punti FiberCop
+          CRO/CNO.
         </p>
-      </div>
-    </header>
+      </header>
 
-    <main class="layout">
-      <aside class="sidebar">
-        <div class="panel panel-info">
-          <h2>Notifiche Telegram</h2>
-          <p class="panel-note">
-            Apri un punto sulla mappa e usa "🔔 Avvisami su Telegram" per ricevere un avviso quando cambia stato.
-          </p>
-        </div>
-        <div class="panel">
-          <h2>Filtri</h2>
-
-          <label for="regionSelect">Regione</label>
-          <select id="regionSelect">
-            <option value="">Seleziona una regione</option>
-          </select>
-
-          <label for="provinceSelect">Provincia</label>
-          <select id="provinceSelect" disabled>
-            <option value="">Seleziona una provincia</option>
-          </select>
-
-          <label for="citySelect">Comune</label>
-          <select id="citySelect" disabled>
-            <option value="">Tutti i comuni</option>
-          </select>
-
-          <label for="stateSelect">Stato attuale</label>
-          <select id="stateSelect">
-            <option value="">Tutti gli stati</option>
-          </select>
-
-          <button id="showButton" type="button">Mostra punti</button>
-          <button id="resetButton" type="button">Reset</button>
-        </div>
-        <div class="panel">
-          <h2>Risultati</h2>
-          <p id="statusText">Caricamento dati...</p>
-          <div class="status-meta">
-            <h3>Dati stato</h3>
-            <div class="meta-grid">
-              <strong>File stato sorgente</strong>
-              <span id="statusSourceFile">Caricamento...</span>
-              <strong>Ultimo aggiornamento stato</strong>
-              <span id="statusUpdatedAt">Caricamento...</span>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <section class="map-section">
-        <div id="map"></div>
+      <section class="notice-card" aria-labelledby="review-title">
+        <span class="status-pill" id="siteMode">Revisione temporanea</span>
+        <h2 id="review-title">Il progetto e' temporaneamente in revisione</h2>
+        <p>
+          In questa fase il sito pubblico mostra solo una pagina informativa.
+          La mappa e il viewer completo non sono attivi.
+        </p>
+        <p>
+          Alcuni dati utilizzati dal progetto derivano da fonti pubblicamente
+          accessibili, ma possono essere soggetti a limitazioni d'uso,
+          riutilizzo o redistribuzione.
+        </p>
+        <p>
+          La pubblicazione delle funzionalita' complete riprendera' solo dopo le
+          verifiche necessarie.
+        </p>
       </section>
     </main>
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
-    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

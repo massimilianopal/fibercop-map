@@ -1,4 +1,16 @@
+# Generated datasets
+data/base_points.json
+data/status_points.json
+data/missing_coordinates.json
+
+# Local/raw source files
 data/old_cro_cno.csv
+data/geojson/tmp_*
+tmp_municipalities.geojson
+
+# Python
 __pycache__/
 *.pyc
+
+# macOS
 .DS_Store
